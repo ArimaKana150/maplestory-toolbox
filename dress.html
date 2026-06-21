@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>新楓之谷 工具箱 — 角色穿搭</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <!-- 頂部導覽 bar -->
+    <nav class="navbar">
+        <a class="nav-logo" href="index.html">
+            <span class="logo-dot"></span>新楓之谷 <span class="logo-accent">工具箱</span>
+        </a>
+        <div class="nav-links">
+            <a href="index.html">首頁</a>
+            <a href="calculator.html">計算機</a>
+            <a href="dress.html" class="active">穿搭</a>
+        </div>
+    </nav>
+
+    <div class="wrap wide">
+        <div class="section-title">
+            <h2>角色穿搭預覽</h2>
+            <p>資料來源 maplestory.io 台服(TWMS)，道具預覽直接顯示道具代碼</p>
+        </div>
+
+        <!-- 三欄：左=已穿戴、中=角色預覽、右=衣櫃 -->
+        <div class="dress-grid">
+            <!-- 左：已穿戴清單（中文名 + 代碼） -->
+            <section class="card worn-col">
+                <h2>已穿戴</h2>
+                <div class="worn-list" id="wornList"></div>
+            </section>
+
+            <!-- 中：角色預覽 + 染色 -->
+            <section class="card preview-col">
+                <div class="preview-stage">
+                    <img id="charPreview" alt="角色預覽">
+                </div>
+                <div class="skin-row">
+                    <span class="skin-label">膚色</span>
+                    <div class="skin-tones" id="skinTones"></div>
+                </div>
+                <div class="dye-section">
+                    <h3 class="dye-title">染色 / 物品資訊</h3>
+                    <div id="dyePanel"></div>
+                </div>
+            </section>
+
+            <!-- 右：衣櫃（分類 + 搜尋 + 滾動列表） -->
+            <section class="card closet-col">
+                <div class="cat-tabs" id="catTabs"></div>
+                <div class="search-bar" id="searchBar">
+                    <input type="text" id="searchBox" placeholder="搜尋（中文）">
+                </div>
+                <div class="item-scroll" id="itemScroll">
+                    <div class="item-grid" id="itemGrid"></div>
+                    <div id="scrollSentinel"></div>
+                    <div class="scroll-hint" id="scrollHint"></div>
+                </div>
+            </section>
+        </div>
+    </div>
+
+    <footer class="page-footer">
+        <p>道具資料來自 maplestory.io 公開 API（台服 TWMS），僅供預覽參考，實際以遊戲內為準。</p>
+    </footer>
+
+    <script src="dress.js"></script>
+</body>
+</html>

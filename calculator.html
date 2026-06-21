@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>新楓之谷 工具箱 — VIP 計算機</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <!-- 頂部導覽 bar -->
+    <nav class="navbar">
+        <a class="nav-logo" href="index.html">
+            <span class="logo-dot"></span>新楓之谷 <span class="logo-accent">工具箱</span>
+        </a>
+        <div class="nav-links">
+            <a href="index.html">首頁</a>
+            <a href="calculator.html" class="active">計算機</a>
+            <a href="dress.html">穿搭</a>
+        </div>
+    </nav>
+
+    <div class="wrap narrow">
+        <div class="section-title">
+            <h2>VIP 階級計算機</h2>
+            <p>台幣 : 樂豆點 = 1 : 1，消費即累積 VIP 點數</p>
+        </div>
+
+        <!-- 目標試算：目前點數 + 目標階級 → 還差多少 -->
+        <section class="card">
+            <h2>距目標還差多少</h2>
+            <label class="field">
+                <span>目前累積 VIP 點數</span>
+                <input type="number" id="cPoints" min="0" step="1000" placeholder="例如：120000" value="120000">
+            </label>
+            <div class="field">
+                <span>想達到的階級（點選圖示）</span>
+                <div class="tier-picker" id="tierPicker"></div>
+            </div>
+            <div class="result-badge" id="goalResult"></div>
+        </section>
+
+        <!-- 階級門檻一覽 -->
+        <section class="card overview">
+            <h2>階級門檻一覽</h2>
+            <div class="table-wrap">
+                <table id="thresholdTable">
+                    <thead>
+                        <tr>
+                            <th>階級</th>
+                            <th>需累積 VIP 點數</th>
+                            <th>換算台幣（購買）</th>
+                            <th>換算台幣（送禮）</th>
+                        </tr>
+                    </thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+        </section>
+    </div>
+
+    <footer class="page-footer">
+        <p>本工具依官方公告規則製作，皇家黑為前 50 名審核制不列入計算，實際以官方公告為準。</p>
+    </footer>
+
+    <script src="script.js"></script>
+</body>
+</html>
