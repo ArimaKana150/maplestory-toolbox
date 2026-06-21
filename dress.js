@@ -4,8 +4,9 @@
  * 新楓之谷 工具箱 — 角色穿搭預覽器
  * 資料來源：maplestory.io 公開 API（地區 TWMS 台服 / 版本 256）
  *
- * 版面：左=已穿戴(中文名+代碼)、中=角色預覽、右=衣櫃(滾動載入)、下=染色資訊
- * 渲染：官方角色合成 endpoint；單品染色用 {"itemId":id,"hue":0-360} JSON
+ * 版面：左=已穿戴(中文名+代碼)、中=角色預覽+染色、右=衣櫃(滾動)
+ * 道具來源：item list 全量快取（含髮型/臉，皆有中文名、isCash、性別）
+ * 染色：單品 {"itemId":id,"hue":0-360}；現金裝近似為「可染色」並標圖示
  * ========================================================= */
 
 /* ---------------------------------------------------------
@@ -14,13 +15,9 @@
 const REGION = "TWMS";
 const VERSION = "256";
 const API = "https://maplestory.io/api/" + REGION + "/" + VERSION;
-const CACHE_KEY = "equipCache_" + REGION + "_" + VERSION; // 裝備庫本機快取鍵
+const CACHE_KEY = "equipCacheV2_" + REGION + "_" + VERSION; // 含 cash/gender 欄位的快取
 
 // 角色狀態
-//   items : 各分類道具 id（null 代表未穿）
-//   names : 各分類道具中文名（已穿清單顯示用）
-//   dyes  : 各分類染色色相 hue（0-360，無則未染）
-//   selectedSlot : 目前在染色區選取的分類
 const state = {
     skin: 2000,
     head: 12000,
@@ -40,34 +37,35 @@ const SKINS = [
 ];
 
 /* ---------------------------------------------------------
- * 分類定義
- *   mode "catalog" : 裝備類，從 item list 快取過濾（含中文名）
- *   mode "range"   : 髮型/臉型，用 id 範圍生成縮圖
+ * 分類定義（全部從 item list 快取過濾，皆有中文名）
+ *   match(x) : 以快取精簡道具 {id,name,sub,cat,cash,gender} 判斷
  * --------------------------------------------------------- */
 const CATEGORIES = [
-    { key: "hair",    name: "髮型", mode: "range",   slot: "hair",    range: [30000, 49999], step: 5 },
-    { key: "face",    name: "臉型", mode: "range",   slot: "face",    range: [20000, 29999], step: 5 },
-    { key: "hat",     name: "帽子", mode: "catalog", slot: "hat",     match: function (x) { return x.sub === "Hat"; } },
-    { key: "top",     name: "上衣", mode: "catalog", slot: "top",     match: function (x) { return x.sub === "Top"; } },
-    { key: "overall", name: "連身", mode: "catalog", slot: "overall", match: function (x) { return x.sub === "Overall"; } },
-    { key: "bottom",  name: "下身", mode: "catalog", slot: "bottom",  match: function (x) { return x.sub === "Bottom"; } },
-    { key: "shoes",   name: "鞋子", mode: "catalog", slot: "shoes",   match: function (x) { return x.sub === "Shoes"; } },
-    { key: "weapon",  name: "武器", mode: "catalog", slot: "weapon",  match: function (x) { return (x.cat || "").includes("Weapon"); } }
+    { key: "hair",    name: "髮型", slot: "hair",    match: function (x) { return x.sub === "Hair"; } },
+    { key: "face",    name: "臉型", slot: "face",    match: function (x) { return x.sub === "Face"; } },
+    { key: "hat",     name: "帽子", slot: "hat",     match: function (x) { return x.sub === "Hat"; } },
+    { key: "top",     name: "上衣", slot: "top",     match: function (x) { return x.sub === "Top"; } },
+    { key: "overall", name: "套服", slot: "overall", match: function (x) { return x.sub === "Overall"; } },
+    { key: "bottom",  name: "下身", slot: "bottom",  match: function (x) { return x.sub === "Bottom"; } },
+    { key: "shoes",   name: "鞋子", slot: "shoes",   match: function (x) { return x.sub === "Shoes"; } },
+    { key: "weapon",  name: "武器", slot: "weapon",  match: function (x) { return (x.cat || "").includes("Weapon"); } }
 ];
 
 // 已穿清單顯示用的分類中文對照
 const SLOT_LABEL = {
     face: "臉型", hair: "髮型", hat: "帽子", top: "上衣",
-    bottom: "下身", overall: "連身", shoes: "鞋子", weapon: "武器"
+    bottom: "下身", overall: "套服", shoes: "鞋子", weapon: "武器"
 };
 
-// 裝備庫快取；目前分類、目前清單
+// 裝備庫快取；目前分類、目前清單、篩選狀態
 let EQUIP_CACHE = null;
 let currentCat = CATEGORIES[0];
 let currentList = [];
+let filterCash = "all";   // all | cash | normal
+let filterGender = "all"; // all | male | female
 
 // DOM 參照（init 時設定）
-let elGrid, elScroll, elSearchBox, elSearchBar;
+let elGrid, elScroll, elSearchBox;
 
 /* =========================================================
  * 工具函式
@@ -99,10 +97,10 @@ function partToken(id, slot) {
     return String(id);
 }
 
-// 由目前狀態組出角色合成圖 URL（連身取代上下身，套用各部件染色）
+// 由目前狀態組出角色合成圖 URL（套服取代上下身，套用各部件染色）
 function buildCharacterUrl() {
     const it = state.items;
-    const parts = [String(state.head)]; // 基底頭不染色
+    const parts = [String(state.head)];
     if (it.face) parts.push(partToken(it.face, "face"));
     if (it.hair) parts.push(partToken(it.hair, "hair"));
     if (it.hat) parts.push(partToken(it.hat, "hat"));
@@ -118,10 +116,10 @@ function buildCharacterUrl() {
 }
 
 /* =========================================================
- * 裝備庫快取載入（item list 並行全量抓取）
+ * 裝備庫快取載入（item list 並行全量抓取，含髮型/臉）
  * ========================================================= */
 
-// 確保裝備庫快取已載入：優先讀本機快取，否則並行抓完整個 item list
+// 確保快取已載入：優先讀本機快取，否則並行抓完整個 item list
 function ensureEquipCache(progressCb) {
     if (EQUIP_CACHE) {
         return Promise.resolve(EQUIP_CACHE);
@@ -138,10 +136,10 @@ function ensureEquipCache(progressCb) {
     return loadEquipFromApi(progressCb);
 }
 
-// 並行抓完整個 item list，收集所有裝備（各分類散布於整個 list，需全量）
+// 並行抓完整個 item list，收集所有 Equip（含髮型/臉，皆有中文名）
 function loadEquipFromApi(progressCb) {
     const STEP = 2000;
-    const BATCHES = 25; // 涵蓋整個 item list（裝備散布至 sp 46000+）
+    const BATCHES = 25; // 涵蓋整個 item list
     const all = [];
     let done = 0;
 
@@ -152,8 +150,11 @@ function loadEquipFromApi(progressCb) {
             fetch(url).then(function (r) { return r.json(); }).then(function (list) {
                 list.forEach(function (it) {
                     const ti = it.typeInfo || {};
-                    if (ti.overallCategory === "Equip" && it.id >= 1000000) {
-                        all.push({ id: it.id, name: it.name, sub: ti.subCategory, cat: ti.category || "" });
+                    if (ti.overallCategory === "Equip") {
+                        all.push({
+                            id: it.id, name: it.name, sub: ti.subCategory,
+                            cat: ti.category || "", cash: !!it.isCash, gender: it.requiredGender
+                        });
                     }
                 });
             }).catch(function () {
@@ -172,7 +173,7 @@ function loadEquipFromApi(progressCb) {
         try {
             localStorage.setItem(CACHE_KEY, JSON.stringify(dedup));
         } catch {
-            return dedup;
+            return dedup; // 超出配額則僅用記憶體快取
         }
         return dedup;
     });
@@ -239,10 +240,10 @@ function renderWornList() {
 }
 
 /* =========================================================
- * 染色 / 物品資訊（下方）
+ * 染色 / 物品資訊（中欄角色下方）
  * ========================================================= */
 
-// 渲染下方染色面板：顯示選取物品資訊與色相滑桿
+// 渲染染色面板：顯示選取物品資訊與色相滑桿
 function renderDyePanel() {
     const panel = document.getElementById("dyePanel");
     const slot = state.selectedSlot;
@@ -274,7 +275,6 @@ function renderDyePanel() {
         document.getElementById("hueVal").textContent = this.value;
         const v = Number(this.value);
         clearTimeout(hueTimer);
-        // debounce：拖動時只更新數字，停下 200ms 才重載預覽（每個色相首次生成約 1 秒）
         hueTimer = setTimeout(function () {
             state.dyes[slot] = v;
             renderPreview();
@@ -292,12 +292,17 @@ function renderDyePanel() {
  * 道具卡片與選取（右欄衣櫃）
  * ========================================================= */
 
-// 產生道具卡片 HTML（縮圖 + 名稱 + 道具代碼）
-function itemCardHtml(id, name, slot) {
+// 可染色圖示（現金裝近似為可染色）
+const DYE_BADGE = '<span class="dye-badge" title="現金裝，多數可染色">' +
+    '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 3c3.2 4.2 6 7.2 6 11a6 6 0 0 1-12 0c0-3.8 2.8-6.8 6-11z"/></svg></span>';
+
+// 產生道具卡片 HTML（縮圖 + 名稱 + 道具代碼，現金裝加可染色圖示）
+function itemCardHtml(id, name, slot, cash) {
     const selected = state.items[slot] === id ? " selected" : "";
     const label = name ? '<span class="item-name">' + esc(name) + "</span>" : "";
+    const badge = cash ? DYE_BADGE : "";
     return '<button type="button" class="item-card' + selected + '" data-id="' + id +
-        '" data-slot="' + slot + '" data-name="' + esc(name || "") + '">' +
+        '" data-slot="' + slot + '" data-name="' + esc(name || "") + '">' + badge +
         '<img class="item-thumb" src="' + iconUrl(id) + '" alt="" loading="lazy" ' +
         'onerror="this.closest(\'.item-card\').style.display=\'none\'">' +
         label + '<span class="item-id">' + id + "</span></button>";
@@ -306,12 +311,11 @@ function itemCardHtml(id, name, slot) {
 // 同步衣櫃卡片的選取高亮
 function syncGridSelection() {
     elGrid.querySelectorAll(".item-card").forEach(function (card) {
-        const on = state.items[card.dataset.slot] === Number(card.dataset.id);
-        card.classList.toggle("selected", on);
+        card.classList.toggle("selected", state.items[card.dataset.slot] === Number(card.dataset.id));
     });
 }
 
-// 選取道具：套用到對應 slot 並處理連身/上下身互斥
+// 選取道具：套用到對應 slot 並處理套服/上下身互斥
 function selectItem(id, slot, name) {
     if (slot === "overall") {
         state.items.top = null;
@@ -331,54 +335,50 @@ function selectItem(id, slot, name) {
 }
 
 /* =========================================================
- * 衣櫃瀏覽：滾動無限載入
+ * 衣櫃瀏覽：篩選 + 搜尋 + 一次全載入
  * ========================================================= */
 
-// 依目前分類與搜尋關鍵字，建立要顯示的道具清單
+// 依目前分類、篩選、搜尋關鍵字，建立要顯示的道具清單
 function buildList() {
     const cat = currentCat;
-    if (cat.mode === "catalog") {
-        const kw = (elSearchBox.value || "").trim();
-        let arr = EQUIP_CACHE.filter(function (x) { return cat.match(x); });
-        if (kw) {
-            arr = arr.filter(function (x) { return x.name?.includes(kw); });
-        }
-        currentList = arr.map(function (x) { return { id: x.id, name: x.name }; });
-    } else {
-        const kw = (elSearchBox.value || "").trim();
-        const out = [];
-        for (let id = cat.range[0]; id <= cat.range[1]; id += cat.step) {
-            if (!kw || String(id).includes(kw)) {
-                out.push({ id: id, name: "" });
-            }
-        }
-        currentList = out;
+    const kw = (elSearchBox.value || "").trim();
+    let arr = EQUIP_CACHE.filter(function (x) { return cat.match(x); });
+
+    if (filterCash === "cash") {
+        arr = arr.filter(function (x) { return x.cash; });
+    } else if (filterCash === "normal") {
+        arr = arr.filter(function (x) { return !x.cash; });
     }
+    if (filterGender === "male") {
+        arr = arr.filter(function (x) { return x.gender !== 1; });
+    } else if (filterGender === "female") {
+        arr = arr.filter(function (x) { return x.gender !== 0; });
+    }
+    if (kw) {
+        arr = arr.filter(function (x) { return x.name?.includes(kw) || String(x.id).includes(kw); });
+    }
+    currentList = arr.map(function (x) { return { id: x.id, name: x.name, cash: x.cash }; });
 }
 
 // 更新底部提示文字（顯示總數）
 function updateScrollHint() {
     const hint = document.getElementById("scrollHint");
     const n = currentList.length;
-    if (currentCat.mode === "catalog") {
-        hint.textContent = n === 0 ? "找不到符合的" + currentCat.name : "共 " + n + " 件";
-    } else {
-        hint.textContent = "共 " + n + " 款";
-    }
+    hint.textContent = n === 0 ? "找不到符合的" + currentCat.name : "共 " + n + " 件";
 }
 
-// 重建並「一次渲染全部」目前分類的道具（圖片用 lazy 載入，滾輪直接瀏覽到底）
+// 重建並一次渲染目前分類的全部道具（圖片用 lazy 載入）
 function showCategory() {
     buildList();
     const slot = currentCat.slot;
     elGrid.innerHTML = currentList.map(function (x) {
-        return itemCardHtml(x.id, x.name, slot);
+        return itemCardHtml(x.id, x.name, slot, x.cash);
     }).join("");
     elScroll.scrollTop = 0;
     updateScrollHint();
 }
 
-// 切到裝備分類時確保快取載入再顯示（載入中顯示進度）
+// 確保快取載入再顯示（載入中顯示進度）
 function loadCatalogThenShow() {
     if (EQUIP_CACHE) {
         showCategory();
@@ -394,7 +394,7 @@ function loadCatalogThenShow() {
 }
 
 /* =========================================================
- * 分類切換與初始化
+ * 分類 / 篩選切換與初始化
  * ========================================================= */
 
 // 切換到指定分類
@@ -403,18 +403,8 @@ function selectCategory(key) {
     document.querySelectorAll("#catTabs .cat-tab").forEach(function (tab) {
         tab.classList.toggle("active", tab.dataset.key === key);
     });
-
-    if (currentCat.mode === "catalog") {
-        elSearchBar.style.display = "";
-        elSearchBox.value = "";
-        elSearchBox.placeholder = "在" + currentCat.name + "中搜尋（中文）";
-        loadCatalogThenShow();
-    } else {
-        elSearchBar.style.display = "";
-        elSearchBox.value = "";
-        elSearchBox.placeholder = "輸入" + currentCat.name + "代碼篩選（例如 " + currentCat.range[0] + "）";
-        showCategory();
-    }
+    elSearchBox.placeholder = "搜尋" + currentCat.name + "名稱或代碼";
+    loadCatalogThenShow();
 }
 
 // 渲染分類 tabs
@@ -428,13 +418,38 @@ function renderTabs() {
     });
 }
 
-// 渲染膚色選擇器
+// 綁定篩選按鈕（類型 / 性別）
+function bindFilters() {
+    document.querySelectorAll("#cashFilter .filter-btn").forEach(function (btn) {
+        btn.addEventListener("click", function () {
+            filterCash = btn.dataset.v;
+            setFilterActive("cashFilter", btn);
+            if (EQUIP_CACHE) showCategory();
+        });
+    });
+    document.querySelectorAll("#genderFilter .filter-btn").forEach(function (btn) {
+        btn.addEventListener("click", function () {
+            filterGender = btn.dataset.v;
+            setFilterActive("genderFilter", btn);
+            if (EQUIP_CACHE) showCategory();
+        });
+    });
+}
+
+// 切換篩選按鈕的 active 高亮
+function setFilterActive(groupId, btn) {
+    document.querySelectorAll("#" + groupId + " .filter-btn").forEach(function (b) {
+        b.classList.toggle("active", b === btn);
+    });
+}
+
+// 渲染膚色選擇器並顯示當前名稱
 function renderSkins() {
     const box = document.getElementById("skinTones");
     box.innerHTML = SKINS.map(function (s) {
         const active = s.id === state.skin ? " active" : "";
         return '<button type="button" class="skin-dot' + active + '" data-skin="' + s.id +
-            '" title="' + esc(s.name) + '"><img src="' + API + "/character/" + s.id +
+            '" data-name="' + esc(s.name) + '" title="' + esc(s.name) + '"><img src="' + API + "/character/" + s.id +
             '/12000/stand1/0" alt="' + esc(s.name) + '" onerror="this.style.opacity=0.3"></button>';
     }).join("");
     box.querySelectorAll(".skin-dot").forEach(function (btn) {
@@ -443,10 +458,18 @@ function renderSkins() {
             box.querySelectorAll(".skin-dot").forEach(function (b) {
                 b.classList.toggle("active", b === btn);
             });
+            updateSkinName();
             renderPreview();
             renderWornList();
         });
     });
+    updateSkinName();
+}
+
+// 更新目前膚色名稱顯示
+function updateSkinName() {
+    const cur = SKINS.find(function (s) { return s.id === state.skin; });
+    document.getElementById("skinName").textContent = cur ? cur.name : "";
 }
 
 // 頁面載入後初始化
@@ -454,24 +477,19 @@ function init() {
     elGrid = document.getElementById("itemGrid");
     elScroll = document.getElementById("itemScroll");
     elSearchBox = document.getElementById("searchBox");
-    elSearchBar = document.getElementById("searchBar");
 
     renderTabs();
     renderSkins();
+    bindFilters();
 
-    // 衣櫃點選（事件委派）
     elGrid.addEventListener("click", function (e) {
         const card = e.target.closest(".item-card");
         if (!card) return;
         selectItem(Number(card.dataset.id), card.dataset.slot, card.dataset.name);
     });
 
-    // 搜尋（catalog 即時本地過濾）
     elSearchBox.addEventListener("input", function () {
-        // range（髮型/臉型）直接重建；catalog 需快取已載入
-        if (currentCat.mode === "range" || EQUIP_CACHE) {
-            showCategory();
-        }
+        if (EQUIP_CACHE) showCategory();
     });
 
     renderPreview();
