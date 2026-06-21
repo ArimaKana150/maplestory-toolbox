@@ -635,32 +635,64 @@ a.tool-card {
 
 .skin-tones {
     display: flex;
+    flex-wrap: wrap;
     gap: 8px;
+    margin-top: 10px;
 }
 
 .skin-dot {
-    width: 38px;
-    height: 46px;
-    padding: 0;
-    overflow: hidden;
-    border-radius: 8px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 3px;
+    width: 56px;
+    padding: 5px 2px 4px;
+    border-radius: 9px;
     border: 2px solid var(--border);
     background: rgba(12, 7, 23, 0.5);
     cursor: pointer;
-    transition: border-color 0.15s;
+    transition: border-color 0.15s, background 0.15s;
 }
 
-.skin-dot img {
+/* 色塊：完整顯示小人，膚色差異在身體一眼可辨 */
+.skin-sw {
+    width: 44px;
+    height: 48px;
+    overflow: hidden;
+    border-radius: 6px;
+    background: rgba(0, 0, 0, 0.25);
+}
+
+.skin-sw img {
     width: 100%;
     height: 100%;
-    object-fit: none;
-    object-position: center -6px;
+    object-fit: contain;
+    object-position: center;
     image-rendering: pixelated;
+}
+
+.skin-cap {
+    font-size: 11px;
+    line-height: 1.1;
+    color: var(--text-dim);
+}
+
+.skin-dot:hover {
+    border-color: var(--neon-2);
+}
+
+.skin-dot:hover .skin-cap {
+    color: var(--text);
 }
 
 .skin-dot.active {
     border-color: var(--neon);
     box-shadow: var(--glow);
+    background: linear-gradient(135deg, rgba(192, 38, 211, 0.22), rgba(168, 85, 247, 0.12));
+}
+
+.skin-dot.active .skin-cap {
+    color: #fff;
 }
 
 /* 分類 tabs */
@@ -693,43 +725,54 @@ a.tool-card {
     background: linear-gradient(135deg, rgba(192, 38, 211, 0.3), rgba(168, 85, 247, 0.18));
 }
 
-/* 篩選列（類型 / 性別） */
-.filter-row {
+/* 篩選列（道具類型 / 性別 下拉選單） */
+.filter-bar {
     display: flex;
     flex-wrap: wrap;
     gap: 10px;
     margin-bottom: 12px;
 }
 
-.filter-group {
+.filter-field {
     display: flex;
+    align-items: center;
+    gap: 6px;
+    flex: 1 1 0;
+    min-width: 0;
+}
+
+.filter-field > span {
+    font-size: 13px;
+    color: var(--text-dim);
+    white-space: nowrap;
+}
+
+.filter-select {
+    flex: 1 1 auto;
+    min-width: 0;
+    background: rgba(12, 7, 23, 0.6);
     border: 1px solid var(--border);
     border-radius: 8px;
-    overflow: hidden;
-}
-
-.filter-btn {
-    padding: 6px 12px;
-    background: rgba(12, 7, 23, 0.5);
-    color: var(--text-dim);
-    border: none;
-    border-left: 1px solid var(--border);
-    font-size: 13px;
-    cursor: pointer;
-    transition: color 0.15s, background 0.15s;
-}
-
-.filter-btn:first-child {
-    border-left: none;
-}
-
-.filter-btn:hover {
     color: var(--text);
+    padding: 7px 10px;
+    font-size: 14px;
+    cursor: pointer;
+    outline: none;
+    transition: border-color 0.15s, box-shadow 0.15s;
 }
 
-.filter-btn.active {
-    color: #fff;
-    background: linear-gradient(135deg, rgba(192, 38, 211, 0.3), rgba(168, 85, 247, 0.18));
+.filter-select:hover {
+    border-color: var(--neon-2);
+}
+
+.filter-select:focus {
+    border-color: var(--neon-2);
+    box-shadow: 0 0 0 3px rgba(168, 85, 247, 0.18);
+}
+
+.filter-select option {
+    background: #140a26;
+    color: var(--text);
 }
 
 /* 搜尋框 */

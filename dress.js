@@ -11,11 +11,45 @@
 
 /* ---------------------------------------------------------
  * API 常數與基底角色
+ * VERSION 啟動時自動解析為 maplestory.io 對該地區「最新就緒」版本，
+ * 故 maplestory.io 一匯入新版，工具即自動跟上（資料源上限非遊戲本體版本）。
  * --------------------------------------------------------- */
 const REGION = "TWMS";
-const VERSION = "256";
-const API = "https://maplestory.io/api/" + REGION + "/" + VERSION;
-const CACHE_KEY = "equipCacheV2_" + REGION + "_" + VERSION; // 含 cash/gender 欄位的快取
+let VERSION = "256"; // 後備值；resolveLatestVersion() 會改為實際最新就緒版本
+let API = apiBase(VERSION);
+let CACHE_KEY = cacheKey(VERSION); // 含 cash 欄位的快取，版本變動即自動換新快取
+
+// 由版本組出 API 基底
+function apiBase(v) {
+    return "https://maplestory.io/api/" + REGION + "/" + v;
+}
+
+// 由版本組出快取鍵
+function cacheKey(v) {
+    return "equipCacheV2_" + REGION + "_" + v;
+}
+
+// 解析 maplestory.io 上該地區「最新就緒（有圖）」版本；失敗則沿用後備值
+function resolveLatestVersion() {
+    return fetch("https://maplestory.io/api/wz").then(function (r) {
+        return r.json();
+    }).then(function (list) {
+        let latest = null;
+        list.forEach(function (x) {
+            if (x.region === REGION && x.isReady && x.hasImages) {
+                const n = Number.parseInt(x.mapleVersionId, 10);
+                if (!Number.isNaN(n) && (latest === null || n > latest)) latest = n;
+            }
+        });
+        if (latest !== null) {
+            VERSION = String(latest);
+            API = apiBase(VERSION);
+            CACHE_KEY = cacheKey(VERSION);
+        }
+    }).catch(function () {
+        // 維持後備版本
+    });
+}
 
 // 角色狀態
 const state = {
@@ -27,13 +61,40 @@ const state = {
     selectedSlot: null
 };
 
-// 可選膚色（實測 TWMS 可用的基底身體 id）
-const SKINS = [
-    { id: 2000, name: "淺色" },
-    { id: 2001, name: "紅潤" },
-    { id: 2002, name: "蒼白" },
-    { id: 2003, name: "古銅" },
-    { id: 2004, name: "黝黑" }
+/* 可選膚色（body id = head id - 10000）。下列為「後備清單」：頁面初載與離線時用。
+ * 道具庫載入後 refreshSkinsFromCache() 會改用該版本實際存在的 head 膚色，
+ * 故 maplestory.io 一更新台服版本，新膚色即自動出現（資料源目前台服上限為 256）。 */
+let SKINS = [
+    { id: 2000, name: "奶油皮膚" },
+    { id: 2001, name: "日光浴皮膚" },
+    { id: 2002, name: "健康皮膚" },
+    { id: 2003, name: "乳白皮膚" },
+    { id: 2004, name: "淒涼皮膚" },
+    { id: 2006, name: "金珠皮膚" },
+    { id: 2007, name: "銀珠皮膚" },
+    { id: 2008, name: "銅珠皮膚" },
+    { id: 2009, name: "蒼白皮膚" },
+    { id: 2010, name: "貴族皮膚" },
+    { id: 2011, name: "華麗皮膚" },
+    { id: 2012, name: "精靈皮膚" },
+    { id: 2013, name: "惡魔皮膚" },
+    { id: 2015, name: "鬆軟花瓣皮膚" },
+    { id: 2016, name: "紅暈花瓣皮膚" },
+    { id: 2017, name: "朦朧皮膚" },
+    { id: 2018, name: "浪漫薰衣草皮膚" },
+    { id: 2019, name: "紅暈薰衣草皮膚" },
+    { id: 2020, name: "乳牛護膚(黑色)" },
+    { id: 2021, name: "乳牛護膚(粉色)" },
+    { id: 2022, name: "乳牛護膚(棕色)" },
+    { id: 2023, name: "乳牛護膚(米色)" },
+    { id: 2024, name: "玉珠皮膚" },
+    { id: 2025, name: "金珠皮膚" },
+    { id: 2026, name: "銀珠皮膚" },
+    { id: 2027, name: "銅珠皮膚" },
+    { id: 2028, name: "尖晶石皮膚" },
+    { id: 2029, name: "紫水晶石皮膚" },
+    { id: 2030, name: "陽光健康皮膚" },
+    { id: 2032, name: "綠磷灰皮膚" }
 ];
 
 /* ---------------------------------------------------------
@@ -57,13 +118,17 @@ const SLOT_LABEL = {
     bottom: "下身", overall: "套服", shoes: "鞋子", weapon: "武器"
 };
 
-// 裝備庫快取；目前分類、目前清單、篩選狀態
+// 裝備庫快取；目前分類、目前清單
 let EQUIP_CACHE = null;
 let currentCat = CATEGORIES[0];
 let currentList = [];
 
+// 篩選狀態：類型 all|cash|normal、性別 any|male|female
+let filterType = "all";
+let filterGender = "any";
+
 // DOM 參照（init 時設定）
-let elGrid, elScroll, elSearchBox;
+let elGrid, elScroll, elSearchBox, elFilterType, elFilterGender;
 
 /* =========================================================
  * 工具函式
@@ -84,6 +149,44 @@ function esc(s) {
     return String(s).replace(/[&<>"]/g, function (c) {
         return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c];
     });
+}
+
+/* 依道具 id 判定性別（沿用 MapleSalon2 原始邏輯，比 API 的 requiredGender 準確）
+ * 0=男 1=女 2=共用；髮/臉/裝備各用 id 的第四位 (floor(id/1000)%10) 對照不同對應表 */
+const GENDER = { MALE: 0, FEMALE: 1, SHARE: 2 };
+
+// 髮型性別
+function hairGender(id) {
+    const t = Math.floor(id / 1000) % 10;
+    if (t === 0 || t === 3 || t === 5 || t === 6) return GENDER.MALE;
+    if (t === 1 || t === 4 || t === 7 || t === 8) return GENDER.FEMALE;
+    return GENDER.SHARE;
+}
+
+// 臉型性別
+function faceGender(id) {
+    const t = Math.floor(id / 1000) % 10;
+    if (t === 0 || t === 3 || t === 5 || t === 7) return GENDER.MALE;
+    if (t === 1 || t === 4 || t === 6 || t === 8) return GENDER.FEMALE;
+    return GENDER.SHARE;
+}
+
+// 一般裝備性別（第四位 0=男 1=女 其餘共用）
+function equipGender(id) {
+    const t = Math.floor(id / 1000) % 10;
+    if (t === 0) return GENDER.MALE;
+    if (t === 1) return GENDER.FEMALE;
+    return GENDER.SHARE;
+}
+
+// 綜合性別判定：依 id 範圍分流到髮/臉/裝備
+function getGender(id) {
+    if (id < 100000) {
+        if ((id >= 20000 && id < 30000) || (id >= 50000 && id < 60000)) return faceGender(id);
+        return hairGender(id);
+    }
+    if (id >= 1000000 && id < 1710000) return equipGender(id);
+    return GENDER.SHARE;
 }
 
 // 將單一部件轉為合成 URL 片段：有染色則用 JSON {itemId,hue}，否則純 id
@@ -336,11 +439,26 @@ function selectItem(id, slot, name) {
  * 衣櫃瀏覽：篩選 + 搜尋 + 一次全載入
  * ========================================================= */
 
-// 依目前分類、篩選、搜尋關鍵字，建立要顯示的道具清單
+/* 依目前分類、類型、性別、搜尋關鍵字，建立要顯示的道具清單
+ * 性別採 id 判定的 getGender()（0=男 1=女 2=共用）並用「包含式」過濾：選男性顯示
+ * 「非純女裝」、選女性顯示「非純男裝」，共用裝兩邊都看得到，符合遊戲內實際可穿邏輯。 */
 function buildList() {
     const cat = currentCat;
     const kw = (elSearchBox.value || "").trim();
     let arr = EQUIP_CACHE.filter(function (x) { return cat.match(x); });
+
+    if (filterType === "cash") {
+        arr = arr.filter(function (x) { return x.cash; });
+    } else if (filterType === "normal") {
+        arr = arr.filter(function (x) { return !x.cash; });
+    }
+
+    if (filterGender === "male") {
+        arr = arr.filter(function (x) { return getGender(x.id) !== GENDER.FEMALE; });
+    } else if (filterGender === "female") {
+        arr = arr.filter(function (x) { return getGender(x.id) !== GENDER.MALE; });
+    }
+
     if (kw) {
         arr = arr.filter(function (x) { return x.name?.includes(kw) || String(x.id).includes(kw); });
     }
@@ -365,9 +483,10 @@ function showCategory() {
     updateScrollHint();
 }
 
-// 確保快取載入再顯示（載入中顯示進度）
+// 確保快取載入再顯示（載入中顯示進度）；快取就緒後依實際資料刷新膚色清單
 function loadCatalogThenShow() {
     if (EQUIP_CACHE) {
+        refreshSkinsFromCache();
         showCategory();
         return;
     }
@@ -375,7 +494,10 @@ function loadCatalogThenShow() {
     document.getElementById("scrollHint").textContent = "";
     ensureEquipCache(function (done, total) {
         elGrid.innerHTML = '<p class="grid-hint">首次載入道具庫中… ' + done + " / " + total + " 批</p>";
-    }).then(showCategory).catch(function () {
+    }).then(function () {
+        refreshSkinsFromCache();
+        showCategory();
+    }).catch(function () {
         elGrid.innerHTML = '<p class="grid-hint">道具庫載入失敗，請重新整理頁面</p>';
     });
 }
@@ -405,14 +527,46 @@ function renderTabs() {
     });
 }
 
+// 綁定類型 / 性別下拉選單：變更即重渲染目前分類
+function bindFilters() {
+    elFilterType.addEventListener("change", function () {
+        filterType = elFilterType.value;
+        if (EQUIP_CACHE) showCategory();
+    });
+    elFilterGender.addEventListener("change", function () {
+        filterGender = elFilterGender.value;
+        if (EQUIP_CACHE) showCategory();
+    });
+}
+
+/* 道具庫載入後，改用該版本實際存在的 head 膚色（body id = head id - 10000）。
+ * head 名稱即官方膚色名稱；有資料才覆蓋後備清單並重渲染，避免清單變空。 */
+function refreshSkinsFromCache() {
+    if (!EQUIP_CACHE) return;
+    const seen = {};
+    const heads = [];
+    EQUIP_CACHE.forEach(function (x) {
+        if (x.sub === "Head" && x.id >= 12000 && x.id < 13000 && !seen[x.id]) {
+            seen[x.id] = true;
+            heads.push({ id: x.id - 10000, name: x.name || "皮膚 " + (x.id - 10000) });
+        }
+    });
+    if (!heads.length) return;
+    heads.sort(function (a, b) { return a.id - b.id; });
+    SKINS = heads;
+    renderSkins();
+}
+
 // 渲染膚色選擇器並顯示當前名稱
 function renderSkins() {
     const box = document.getElementById("skinTones");
     box.innerHTML = SKINS.map(function (s) {
         const active = s.id === state.skin ? " active" : "";
         return '<button type="button" class="skin-dot' + active + '" data-skin="' + s.id +
-            '" data-name="' + esc(s.name) + '" title="' + esc(s.name) + '"><img src="' + API + "/character/" + s.id +
-            '/12000/stand1/0" alt="' + esc(s.name) + '" onerror="this.style.opacity=0.3"></button>';
+            '" data-name="' + esc(s.name) + '" title="' + esc(s.name) + " · 代碼 " + s.id + '">' +
+            '<span class="skin-sw"><img src="' + API + "/character/" + s.id +
+            '/12000/stand1/0" alt="' + esc(s.name) + '" onerror="this.style.opacity=0.3"></span>' +
+            '<span class="skin-cap">' + esc(s.name) + "</span></button>";
     }).join("");
     box.querySelectorAll(".skin-dot").forEach(function (btn) {
         btn.addEventListener("click", function () {
@@ -428,10 +582,10 @@ function renderSkins() {
     updateSkinName();
 }
 
-// 更新目前膚色名稱顯示
+// 更新目前膚色名稱顯示（名稱 + 代碼）
 function updateSkinName() {
     const cur = SKINS.find(function (s) { return s.id === state.skin; });
-    document.getElementById("skinName").textContent = cur ? cur.name : "";
+    document.getElementById("skinName").textContent = cur ? cur.name + " · 代碼 " + cur.id : "";
 }
 
 // 頁面載入後初始化
@@ -439,9 +593,12 @@ function init() {
     elGrid = document.getElementById("itemGrid");
     elScroll = document.getElementById("itemScroll");
     elSearchBox = document.getElementById("searchBox");
+    elFilterType = document.getElementById("filterType");
+    elFilterGender = document.getElementById("filterGender");
 
+    // 不需 API 的 UI 先渲染
     renderTabs();
-    renderSkins();
+    bindFilters();
 
     elGrid.addEventListener("click", function (e) {
         const card = e.target.closest(".item-card");
@@ -453,12 +610,16 @@ function init() {
         if (EQUIP_CACHE) showCategory();
     });
 
-    renderPreview();
-    renderWornList();
-    renderDyePanel();
+    // 先確定最新版本（決定 API/快取鍵），再做需要 API 的渲染
+    resolveLatestVersion().then(function () {
+        renderSkins();
+        renderPreview();
+        renderWornList();
+        renderDyePanel();
 
-    const wantCat = new URLSearchParams(location.search).get("cat");
-    selectCategory(getCat(wantCat) ? wantCat : CATEGORIES[0].key);
+        const wantCat = new URLSearchParams(location.search).get("cat");
+        selectCategory(getCat(wantCat) ? wantCat : CATEGORIES[0].key);
+    });
 }
 
 document.addEventListener("DOMContentLoaded", init);
