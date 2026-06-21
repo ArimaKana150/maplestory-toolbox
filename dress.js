@@ -61,8 +61,6 @@ const SLOT_LABEL = {
 let EQUIP_CACHE = null;
 let currentCat = CATEGORIES[0];
 let currentList = [];
-let filterCash = "all";   // all | cash | normal
-let filterGender = "all"; // all | male | female
 
 // DOM 參照（init 時設定）
 let elGrid, elScroll, elSearchBox;
@@ -343,17 +341,6 @@ function buildList() {
     const cat = currentCat;
     const kw = (elSearchBox.value || "").trim();
     let arr = EQUIP_CACHE.filter(function (x) { return cat.match(x); });
-
-    if (filterCash === "cash") {
-        arr = arr.filter(function (x) { return x.cash; });
-    } else if (filterCash === "normal") {
-        arr = arr.filter(function (x) { return !x.cash; });
-    }
-    if (filterGender === "male") {
-        arr = arr.filter(function (x) { return x.gender !== 1; });
-    } else if (filterGender === "female") {
-        arr = arr.filter(function (x) { return x.gender !== 0; });
-    }
     if (kw) {
         arr = arr.filter(function (x) { return x.name?.includes(kw) || String(x.id).includes(kw); });
     }
@@ -418,31 +405,6 @@ function renderTabs() {
     });
 }
 
-// 綁定篩選按鈕（類型 / 性別）
-function bindFilters() {
-    document.querySelectorAll("#cashFilter .filter-btn").forEach(function (btn) {
-        btn.addEventListener("click", function () {
-            filterCash = btn.dataset.v;
-            setFilterActive("cashFilter", btn);
-            if (EQUIP_CACHE) showCategory();
-        });
-    });
-    document.querySelectorAll("#genderFilter .filter-btn").forEach(function (btn) {
-        btn.addEventListener("click", function () {
-            filterGender = btn.dataset.v;
-            setFilterActive("genderFilter", btn);
-            if (EQUIP_CACHE) showCategory();
-        });
-    });
-}
-
-// 切換篩選按鈕的 active 高亮
-function setFilterActive(groupId, btn) {
-    document.querySelectorAll("#" + groupId + " .filter-btn").forEach(function (b) {
-        b.classList.toggle("active", b === btn);
-    });
-}
-
 // 渲染膚色選擇器並顯示當前名稱
 function renderSkins() {
     const box = document.getElementById("skinTones");
@@ -480,7 +442,6 @@ function init() {
 
     renderTabs();
     renderSkins();
-    bindFilters();
 
     elGrid.addEventListener("click", function (e) {
         const card = e.target.closest(".item-card");
